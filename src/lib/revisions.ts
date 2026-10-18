@@ -49,11 +49,16 @@ export function submitRevision(input: {
       [id, input.commissionId, v + 1, input.filePath, input.artistMessage]
     );
 
+    // 'delivered' is the only state that blocks a new upload. Uploading while
+    // a prior revision is still pending is legal — it is the workflow that
+    // produces the not_latest race scenario (artist uploads v2 before the
+    // client decides v1). The superseded revision stays pending forever and
+    // is unreachable from recordDecision's claim.
     const advanced = tx.run(
       `UPDATE commissions
           SET status = 'awaiting_approval',
               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-        WHERE id = ? AND status IN ('queued','in_progress','approved')`,
+        WHERE id = ? AND status IN ('queued','in_progress','awaiting_approval','approved')`,
       [input.commissionId]
     );
     if (advanced.changes !== 1) {
@@ -91,8 +96,7 @@ export function recordDecision(
     );
 
     if (claimed.changes === 0) {
-      const reason = classifyFailure(tx, revisionId);
-      return { ok: false, reason };
+      return { ok: false, reason: classifyFailure(tx, revisionId) };
     }
 
     // Defensive: assert the commission update lands on exactly one row.
@@ -113,6 +117,10 @@ export function recordDecision(
   });
 }
 
+// Order matters: the revision's own state is more specific than the
+// commission's state. A revision can be `approved` while the commission is
+// `approved` (the common case), so checking status first would mislabel
+// already_decided as wrong_state.
 function classifyFailure(tx: Tx, revisionId: string): DecisionResult extends
   { ok: false; reason: infer R } ? R : never {
   const rev = tx.get<{
@@ -127,8 +135,8 @@ function classifyFailure(tx: Tx, revisionId: string): DecisionResult extends
     [revisionId]
   );
   if (!rev) return "not_found";
-  if (rev.status !== "awaiting_approval") return "wrong_state";
   if (rev.decision !== "pending") return "already_decided";
+  if (rev.status !== "awaiting_approval") return "wrong_state";
   const latest = tx.get<{ v: number }>(
     `SELECT MAX(version_number) AS v FROM revisions WHERE commission_id = ?`,
     [rev.commission_id]
