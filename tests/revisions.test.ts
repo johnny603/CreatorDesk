@@ -6,18 +6,23 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 
 // Redirect db.ts to an in-memory database BEFORE importing anything that
 // touches it. This is the only place that knows the DB is in-memory.
+//
+// Applies every migration in migrations/, in lexicographic order, matching
+// scripts/migrate.ts. Do not hard-code a single filename here — that breaks
+// the moment a later migration adds a column a lib function reads.
 vi.mock("@/lib/db", async () => {
   const Database = (await import("better-sqlite3")).default;
   const fs = await import("node:fs");
   const path = await import("node:path");
   const db = new Database(":memory:");
   db.pragma("foreign_keys = ON");
-  db.exec(
-    fs.readFileSync(
-      path.resolve(process.cwd(), "migrations/001_init.sql"),
-      "utf8"
-    )
-  );
+
+  const migrationsDir = path.resolve(process.cwd(), "migrations");
+  const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
+  for (const f of files) {
+    db.exec(fs.readFileSync(path.join(migrationsDir, f), "utf8"));
+  }
+
   const query = (sql: string, params: unknown[] = []) =>
     db.prepare(sql).all(...params);
   const get = (sql: string, params: unknown[] = []) =>
@@ -94,7 +99,6 @@ describe("submitRevision", () => {
     const { id } = newCommission();
     const v1 = uploadRevision(id);
     revisions.recordDecision(v1.id, "approved", null);
-    // Commission is now 'approved' — artist starts the next stage.
     const v2 = uploadRevision(id);
     expect(v2.version_number).toBe(2);
   });
@@ -155,7 +159,6 @@ describe("recordDecision — the four race scenarios", () => {
       ok: false,
       reason: "already_decided",
     });
-    // Commission state must not have moved from the second call.
     const c = get<{ status: string }>(`SELECT status FROM commissions WHERE id = ?`, [id]);
     expect(c?.status).toBe("approved");
   });
@@ -164,18 +167,14 @@ describe("recordDecision — the four race scenarios", () => {
     const { id } = newCommission();
     const v1 = uploadRevision(id);
     const v2 = uploadRevision(id);
-    // The client, with a stale tab, tries to decide v1.
     expect(revisions.recordDecision(v1.id, "approved", null)).toEqual({
       ok: false,
       reason: "not_latest",
     });
-    // Commission is still awaiting approval of v2, not approved.
     const c = get<{ status: string }>(`SELECT status FROM commissions WHERE id = ?`, [id]);
     expect(c?.status).toBe("awaiting_approval");
-    // v1 must be untouched.
     const r1 = get<{ decision: string }>(`SELECT decision FROM revisions WHERE id = ?`, [v1.id]);
     expect(r1?.decision).toBe("pending");
-    // v2 is still pending and decidable.
     expect(revisions.recordDecision(v2.id, "approved", null)).toEqual({ ok: true });
   });
 
@@ -183,8 +182,6 @@ describe("recordDecision — the four race scenarios", () => {
     const { id } = newCommission();
     const v1 = uploadRevision(id);
     revisions.recordDecision(v1.id, "approved", null);
-    // Commission is now 'approved'. Upload v2 to get back to awaiting, then
-    // manually force status to delivered to simulate a bad state.
     uploadRevision(id);
     run(`UPDATE commissions SET status = 'delivered' WHERE id = ?`, [id]);
     const pending = revisions.latestPendingForCommission(id);
@@ -231,8 +228,6 @@ describe("latestPendingForCommission", () => {
     const { id } = newCommission();
     const v1 = uploadRevision(id);
     const v2 = uploadRevision(id);
-    // Both pending (artist uploaded twice before client reviewed).
-    // The route decides on v2 only — v1 is superseded.
     expect(revisions.latestPendingForCommission(id)?.id).toBe(v2.id);
     expect(revisions.latestPendingForCommission(id)?.id).not.toBe(v1.id);
   });
@@ -242,5 +237,52 @@ describe("latestPendingForCommission", () => {
     const v1 = uploadRevision(id);
     revisions.recordDecision(v1.id, "approved", null);
     expect(revisions.latestPendingForCommission(id)).toBeUndefined();
+  });
+});
+
+// Token expiry: the same table the mock loads now carries
+// approval_token_expires_at, so the app's expiry filter is exercised here.
+describe("token expiry", () => {
+  it("rejects a token whose approval_token_expires_at is in the past", () => {
+    const { id, rawToken } = newCommission();
+    expect(commissions.findByTokenHash(hashToken(rawToken))?.id).toBe(id);
+
+    // Force the token into the past. This simulates 30 days passing without
+    // rotating — the client's saved link should stop working.
+    run(
+      `UPDATE commissions
+          SET approval_token_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 day')
+        WHERE id = ?`,
+      [id]
+    );
+
+    expect(commissions.findByTokenHash(hashToken(rawToken))).toBeUndefined();
+  });
+
+  it("treats a NULL expires_at as 'no expiry' (legacy tokens)", () => {
+    const { id, rawToken } = newCommission();
+    run(`UPDATE commissions SET approval_token_expires_at = NULL WHERE id = ?`, [id]);
+    expect(commissions.findByTokenHash(hashToken(rawToken))?.id).toBe(id);
+  });
+
+  it("rotateApprovalToken sets a fresh 30-day window", () => {
+    const { id } = newCommission();
+    // Expire the old token first.
+    run(
+      `UPDATE commissions
+          SET approval_token_expires_at = strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 day')
+        WHERE id = ?`,
+      [id]
+    );
+    const freshRaw = commissions.rotateApprovalToken(id);
+    const fresh = commissions.findByTokenHash(hashToken(freshRaw));
+    expect(fresh?.id).toBe(id);
+    expect(fresh?.approval_token_expires_at).toBeTruthy();
+    // Approx 30 days: within 29–31 days of now.
+    const expiresAt = new Date(fresh!.approval_token_expires_at!).getTime();
+    const now = Date.now();
+    const days = (expiresAt - now) / (1000 * 60 * 60 * 24);
+    expect(days).toBeGreaterThan(29);
+    expect(days).toBeLessThan(31);
   });
 });
