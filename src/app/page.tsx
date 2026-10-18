@@ -4,8 +4,34 @@ import { currentArtistId } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
+// Sort order is actionability, not recency. The artist opens the dashboard to
+// answer "what do I do next?" — `in_progress` (client asked for changes) and
+// `approved` (client signed off, artist needs to deliver) come first. `queued`
+// and `awaiting_approval` have no artist action; they sort below.
+const STATUS_ORDER: Record<commissions.Status, number> = {
+  in_progress: 0,
+  approved: 1,
+  awaiting_approval: 2,
+  queued: 3,
+  delivered: 4,
+};
+
+const STATUS_LABEL: Record<commissions.Status, string> = {
+  queued: "queued",
+  in_progress: "needs your next revision",
+  awaiting_approval: "waiting on client",
+  approved: "approved — ready to deliver",
+  delivered: "delivered",
+};
+
 export default function Dashboard() {
-  const rows = commissions.listForArtist(currentArtistId());
+  const rows = commissions.listForArtist(currentArtistId()).sort((a, b) => {
+    const sa = STATUS_ORDER[a.status];
+    const sb = STATUS_ORDER[b.status];
+    if (sa !== sb) return sa - sb;
+    return a.updated_at < b.updated_at ? 1 : -1; // newest first within group
+  });
+
   return (
     <main>
       <h1>CreatorDesk</h1>
@@ -24,14 +50,20 @@ export default function Dashboard() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((c) => (
-              <tr key={c.id} style={{ borderTop: "1px solid #ddd" }}>
-                <td><Link href={`/c/${c.id}`}>{c.title}</Link></td>
-                <td>{c.client_name}</td>
-                <td><code>{c.status}</code></td>
-                <td>{c.updated_at}</td>
-              </tr>
-            ))}
+            {rows.map((c) => {
+              const needsAction = STATUS_ORDER[c.status] <= 1;
+              return (
+                <tr key={c.id} style={{ borderTop: "1px solid #ddd" }}>
+                  <td>
+                    {needsAction ? "● " : "  "}
+                    <Link href={`/c/${c.id}`}>{c.title}</Link>
+                  </td>
+                  <td>{c.client_name}</td>
+                  <td><code>{STATUS_LABEL[c.status]}</code></td>
+                  <td>{c.updated_at}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
