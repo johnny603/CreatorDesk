@@ -2,26 +2,43 @@
 import { useState } from "react";
 
 export default function NewCommission() {
-  const [rawToken, setRawToken] = useState<string | null>(null);
   const [link, setLink] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   async function onSubmit(form: FormData) {
-    const res = await fetch("/api/commissions", {
-      method: "POST",
-      body: form,
-    });
+    const res = await fetch("/api/commissions", { method: "POST", body: form });
     if (!res.ok) return alert(await res.text());
     const { rawToken } = await res.json();
-    setRawToken(rawToken);
     setLink(`${location.origin}/a/${rawToken}`);
+  }
+
+  async function copy() {
+    if (!link) return;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API can fail if the page isn't focused or in some browsers.
+      // The <code> element is still selectable; no error state needed.
+    }
   }
 
   if (link) {
     return (
       <main>
         <h1>Commission created</h1>
-        <p>Send this link to your client. It is shown once.</p>
-        <code>{link}</code>
+        <p>
+          Send this link to your client. <strong>It is shown once.</strong> If you
+          lose it, you can rotate it from the commission page — the old link
+          will stop working.
+        </p>
+        <p>
+          <code>{link}</code>
+        </p>
+        <p>
+          <button onClick={copy} type="button">{copied ? "Copied!" : "Copy link"}</button>
+        </p>
       </main>
     );
   }
