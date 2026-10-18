@@ -14,6 +14,21 @@ hosting, no contracts. The schema contract is `migrations/001_init.sql` — read
 before contributing. The next milestone is user validation (five interviews with
 working commission artists), not more features.
 
+## Deploying
+
+**Never expose port 3000 to the internet.** The client link contains a bearer
+token in the URL. Over plain HTTP that token is visible to your ISP, any Wi-Fi
+access point, and every proxy in between. Put a TLS-terminating reverse proxy
+in front of CreatorDesk and terminate HTTPS there.
+
+Minimal Caddyfile:
+
+```caddy
+creatordesk.example.com {
+  reverse_proxy 127.0.0.1:3000
+}
+```
+
 ---
 
 ## What it does
