@@ -20,9 +20,6 @@ export type CommissionRow = {
   updated_at: string;
 };
 
-// 30 days. Long enough that an artist who sends a link and forgets about it
-// for two weeks is fine; short enough that a leaked link stops working before
-// the commission is likely to be re-opened.
 const TOKEN_TTL_DAYS = 30;
 
 function tokenExpiry(): string {
@@ -53,8 +50,8 @@ export function create(input: {
   return { commission, rawToken };
 }
 
-// Reject expired tokens. A NULL expires_at is treated as "no expiry" (legacy
-// tokens); a non-NULL value in the past is rejected.
+// Reject expired tokens. NULL expires_at is "no expiry" (legacy tokens);
+// non-NULL in the past is rejected.
 export function findByTokenHash(hash: string): CommissionRow | undefined {
   return get<CommissionRow>(
     `SELECT * FROM commissions
@@ -105,6 +102,27 @@ export function listForArtist(artistId: string): CommissionRow[] {
 
 export function getById(commissionId: string): CommissionRow | undefined {
   return get<CommissionRow>(`SELECT * FROM commissions WHERE id = ?`, [commissionId]);
+}
+
+export function deleteCommission(commissionId: string): void {
+  transaction((tx) => {
+    const r = tx.run(`DELETE FROM commissions WHERE id = ?`, [commissionId]);
+    if (r.changes !== 1) throw new Error("commission not found");
+    // revisions cascade via FK. Uploaded files in data/uploads/ are not
+    // deleted — the sha256-named design means re-uploading the same bytes
+    // is free, and losing a few KB to an orphaned blob is cheaper than
+    // making delete depend on filesystem operations.
+  });
+}
+
+// Single-artist install: scoped to currentArtistId(). If multi-artist orgs
+// are ever added, this needs an ownership check at the call site — see the
+// dashboard page's comment.
+export function deleteAllForArtist(artistId: string): number {
+  return transaction((tx) => {
+    const r = tx.run(`DELETE FROM commissions WHERE artist_id = ?`, [artistId]);
+    return r.changes;
+  });
 }
 
 function cryptoRandomId(): string {
