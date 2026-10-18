@@ -28,3 +28,9 @@ export async function deliver(commissionId: string) {
   revalidatePath(`/`);
   redirect(`/c/${commissionId}`);
 }
+
+export async function deleteCommissionAction(commissionId: string) {
+  commissions.deleteCommission(commissionId);
+  revalidatePath(`/`);
+  redirect(`/`);
+}
