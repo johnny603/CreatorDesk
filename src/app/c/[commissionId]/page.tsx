@@ -2,8 +2,7 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import * as commissions from "@/lib/commissions";
 import * as revisions from "@/lib/revisions";
-import * as tokens from "@/lib/approval-tokens";
-import { deliver, uploadRevision } from "./actions";
+import { deliver, uploadRevision, deleteCommissionAction } from "./actions";
 
 export const dynamic = "force-dynamic";
 
@@ -14,13 +13,7 @@ export default function CommissionPage({ params }: { params: { commissionId: str
 
   const upload = uploadRevision.bind(null, commission.id);
   const deliverAction = deliver.bind(null, commission.id);
-
-  // Show the client link only if the artist has never sent one. Once a token
-  // is generated we don't have the raw value to redisplay; the rotate button
-  // below generates a fresh one on demand.
-  const clientLink = commission.approval_token_hash
-    ? null // raw token not recoverable
-    : null;
+  const deleteAction = deleteCommissionAction.bind(null, commission.id);
 
   return (
     <main>
@@ -40,8 +33,6 @@ export default function CommissionPage({ params }: { params: { commissionId: str
           action={async () => {
             "use server";
             const raw = commissions.rotateApprovalToken(commission.id);
-            // Redirect with the token in the query string so it renders once.
-            // Never logged server-side.
             const { redirect } = await import("next/navigation");
             redirect(`/c/${commission.id}?link=${encodeURIComponent(raw)}`);
           }}
@@ -78,6 +69,23 @@ export default function CommissionPage({ params }: { params: { commissionId: str
           <p><button type="submit">Mark delivered</button></p>
         </form>
       ) : null}
+
+      <div style={{ marginTop: "3rem", borderTop: "1px solid #ddd", paddingTop: "1rem" }}>
+        <details>
+          <summary style={{ color: "crimson", cursor: "pointer" }}>
+            Delete this commission…
+          </summary>
+          <p style={{ fontSize: "0.9em", color: "#666" }}>
+            This deletes the commission and its revision history. Uploaded files
+            remain on disk but are unreachable. Cannot be undone.
+          </p>
+          <form action={deleteAction}>
+            <button type="submit" style={{ color: "crimson" }}>
+              Yes, delete permanently
+            </button>
+          </form>
+        </details>
+      </div>
     </main>
   );
 }
