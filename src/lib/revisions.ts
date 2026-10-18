@@ -28,6 +28,18 @@ export type RevisionRow = {
   decided_at: string | null;
 };
 
+// Snapshot of the revision history as the client should see it. Same rows as
+// listForCommission, but with the semantics a client cares about (who decided,
+// what they said) rather than the artist view (which needs file paths to
+// render thumbnails).
+export type ClientRevisionSummary = {
+  version_number: number;
+  decision: "pending" | Decision;
+  artist_message: string | null;
+  client_feedback: string | null;
+  decided_at: string | null;
+};
+
 export function submitRevision(input: {
   commissionId: string;
   filePath: string;
@@ -52,11 +64,7 @@ export function submitRevision(input: {
       [id, input.commissionId, v + 1, input.filePath, input.artistMessage]
     );
 
-    // 'delivered' is the only state that blocks a new upload. Uploading while
-    // a prior revision is still pending is legal — it is the workflow that
-    // produces the not_latest race scenario (artist uploads v2 before the
-    // client decides v1). The superseded revision stays pending forever and
-    // is unreachable from recordDecision's claim.
+    // 'delivered' is the only state that blocks a new upload.
     const advanced = tx.run(
       `UPDATE commissions
           SET status = 'awaiting_approval',
@@ -78,7 +86,6 @@ export function recordDecision(
   feedback: string | null
 ): DecisionResult {
   return transaction((tx) => {
-    // Claim: pending AND latest AND commission is awaiting_approval.
     const claimed = tx.run(
       `UPDATE revisions
           SET decision = ?,
@@ -102,7 +109,6 @@ export function recordDecision(
       return { ok: false, reason: classifyFailure(tx, revisionId) };
     }
 
-    // Defensive: assert the commission update lands on exactly one row.
     const newStatus = decision === "approved" ? "approved" : "in_progress";
     const advanced = tx.run(
       `UPDATE commissions
@@ -120,15 +126,8 @@ export function recordDecision(
   });
 }
 
-// Order matters: the revision's own state is more specific than the
-// commission's state. A revision can be `approved` while the commission is
-// `approved` (the common case), so checking status first would mislabel
-// already_decided as wrong_state.
-//
-// Return type is the named union, not a conditional type. The original
-// `DecisionResult extends { ok: false; reason: infer R } ? R : never` collapsed
-// to `never` under strict-mode next build because `{ ok: true }` has no
-// `reason` property and the conditional distributes to `never` for it.
+// Order matters: revision state before commission state, so already_decided
+// is reachable when the commission has already moved on.
 function classifyFailure(tx: Tx, revisionId: string): DecisionFailureReason {
   const rev = tx.get<{
     decision: string;
@@ -149,8 +148,6 @@ function classifyFailure(tx: Tx, revisionId: string): DecisionFailureReason {
     [rev.commission_id]
   )!;
   if (latest.v !== rev.version_number) return "not_latest";
-  // Unreachable: claim failed but state looks claimable. This is an internal
-  // invariant failure, not a client-facing rejection — throw, don't 404.
   throw new Error("decision claim failed without a classified reason");
 }
 
@@ -171,8 +168,18 @@ export function listForCommission(commissionId: string): RevisionRow[] {
   );
 }
 
+// Client-facing history. Excludes file paths — the client page shows context,
+// not thumbnails of past revisions (that's the artist's view).
+export function clientRevisionHistory(commissionId: string): ClientRevisionSummary[] {
+  return query<ClientRevisionSummary>(
+    `SELECT version_number, decision, artist_message, client_feedback, decided_at
+       FROM revisions WHERE commission_id = ?
+      ORDER BY version_number ASC`,
+    [commissionId]
+  );
+}
+
 function cryptoRandomId(): string {
-  // 16 random bytes, hex-encoded. Collisions negligible for a single-artist MVP.
   return Array.from(crypto.getRandomValues(new Uint8Array(16)))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
