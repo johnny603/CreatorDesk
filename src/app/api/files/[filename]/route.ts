@@ -29,7 +29,11 @@ export async function GET(req: Request, { params }: { params: { filename: string
     ext === "jpg" || ext === "jpeg" ? "image/jpeg" :
     ext === "webp" ? "image/webp" :
     "application/octet-stream";
-  return new NextResponse(bytes, {
+  // Copy into a Uint8Array so the argument satisfies BodyInit under
+  // @types/node 22 + TypeScript 5.5. A Buffer has always been valid at
+  // runtime; only the type relationship changed. For the file sizes this
+  // route serves (revision images), the copy is negligible.
+  return new NextResponse(new Uint8Array(bytes), {
     headers: { "content-type": mime, "cache-control": "private, max-age=300" },
   });
 }
