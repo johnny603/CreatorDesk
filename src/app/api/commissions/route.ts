@@ -1,9 +1,6 @@
 import { NextResponse } from "next/server";
 import * as commissions from "@/lib/commissions";
-
-// Single-artist v1: DEMO_ARTIST stands in for the session. Replace with the
-// session's artist_id when auth is added.
-const DEMO_ARTIST = "artist-1";
+import { currentArtistId } from "@/lib/session";
 
 export async function POST(req: Request) {
   const form = await req.formData();
@@ -14,7 +11,7 @@ export async function POST(req: Request) {
     return new NextResponse("title and clientName required", { status: 400 });
   }
   const { commission, rawToken } = commissions.create({
-    artistId: DEMO_ARTIST,
+    artistId: currentArtistId(),
     clientName,
     clientEmail: clientEmailRaw || null,
     title,
