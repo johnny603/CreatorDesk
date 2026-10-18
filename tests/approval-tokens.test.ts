@@ -76,10 +76,10 @@ describe("isWellFormed", () => {
   it("rejects empty, short, long, and non-base64url strings", () => {
     expect(isWellFormed("")).toBe(false);
     expect(isWellFormed("short")).toBe(false);
-    expect(isWellFormed("a".repeat(41))).toBe(false); // length ok, but…
-    expect(isWellFormed("a".repeat(41) + "=")).toBe(false); // padding
-    expect(isWellFormed("a".repeat(41) + "!")).toBe(false); // bad char
-    expect(isWellFormed("a".repeat(200))).toBe(false); // too long
+    expect(isWellFormed("a".repeat(39))).toBe(false);        // too short (39 < 40)
+    expect(isWellFormed("a".repeat(41) + "=")).toBe(false);  // padding — not base64url
+    expect(isWellFormed("a".repeat(41) + "!")).toBe(false);  // bad char
+    expect(isWellFormed("a".repeat(200))).toBe(false);       // too long
   });
 
   it("accepts a generated token", () => {
