@@ -3,11 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "Self-hosted commission engine for digital artists. Upload a revision, send a private approval link, client clicks Approve or Request changes.",
+  "license": "MIT",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "migrate": "tsx scripts/migrate.ts"
+    "migrate": "tsx scripts/migrate.ts",
+    "seed": "tsx scripts/seed.ts",
+    "db:reset": "rm -rf data && npm run migrate && npm run seed"
   },
   "dependencies": {
     "better-sqlite3": "^11.3.0",
@@ -19,7 +23,11 @@
     "@types/better-sqlite3": "^7.6.11",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
     "tsx": "^4.16.2",
     "typescript": "^5.5.3"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
