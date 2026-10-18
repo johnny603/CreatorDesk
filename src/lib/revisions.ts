@@ -5,13 +5,16 @@
 import { transaction, get, query, type Tx } from "./db";
 
 export type Decision = "approved" | "changes_requested";
+
+export type DecisionFailureReason =
+  | "not_found"
+  | "not_latest"
+  | "already_decided"
+  | "wrong_state";
+
 export type DecisionResult =
   | { ok: true }
-  | { ok: false; reason:
-      | "not_found"
-      | "not_latest"
-      | "already_decided"
-      | "wrong_state" };
+  | { ok: false; reason: DecisionFailureReason };
 
 export type RevisionRow = {
   id: string;
@@ -121,8 +124,12 @@ export function recordDecision(
 // commission's state. A revision can be `approved` while the commission is
 // `approved` (the common case), so checking status first would mislabel
 // already_decided as wrong_state.
-function classifyFailure(tx: Tx, revisionId: string): DecisionResult extends
-  { ok: false; reason: infer R } ? R : never {
+//
+// Return type is the named union, not a conditional type. The original
+// `DecisionResult extends { ok: false; reason: infer R } ? R : never` collapsed
+// to `never` under strict-mode next build because `{ ok: true }` has no
+// `reason` property and the conditional distributes to `never` for it.
+function classifyFailure(tx: Tx, revisionId: string): DecisionFailureReason {
   const rev = tx.get<{
     decision: string;
     version_number: number;
