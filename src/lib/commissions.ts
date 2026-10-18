@@ -15,9 +15,21 @@ export type CommissionRow = {
   title: string;
   status: Status;
   approval_token_hash: string;
+  approval_token_expires_at: string | null;
   created_at: string;
   updated_at: string;
 };
+
+// 30 days. Long enough that an artist who sends a link and forgets about it
+// for two weeks is fine; short enough that a leaked link stops working before
+// the commission is likely to be re-opened.
+const TOKEN_TTL_DAYS = 30;
+
+function tokenExpiry(): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + TOKEN_TTL_DAYS);
+  return d.toISOString();
+}
 
 export function create(input: {
   artistId: string;
@@ -28,31 +40,43 @@ export function create(input: {
   const rawToken = tokens.generateToken();
   const hash = tokens.hashToken(rawToken);
   const id = cryptoRandomId();
+  const expiresAt = tokenExpiry();
   transaction((tx) => {
     tx.run(
-      `INSERT INTO commissions (id, artist_id, client_name, client_email, title, approval_token_hash)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [id, input.artistId, input.clientName, input.clientEmail, input.title, hash]
+      `INSERT INTO commissions
+         (id, artist_id, client_name, client_email, title, approval_token_hash, approval_token_expires_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, input.artistId, input.clientName, input.clientEmail, input.title, hash, expiresAt]
     );
   });
   const commission = get<CommissionRow>(`SELECT * FROM commissions WHERE id = ?`, [id])!;
   return { commission, rawToken };
 }
 
+// Reject expired tokens. A NULL expires_at is treated as "no expiry" (legacy
+// tokens); a non-NULL value in the past is rejected.
 export function findByTokenHash(hash: string): CommissionRow | undefined {
-  return get<CommissionRow>(`SELECT * FROM commissions WHERE approval_token_hash = ?`, [hash]);
+  return get<CommissionRow>(
+    `SELECT * FROM commissions
+      WHERE approval_token_hash = ?
+        AND (approval_token_expires_at IS NULL
+             OR approval_token_expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+    [hash]
+  );
 }
 
 export function rotateApprovalToken(commissionId: string): string {
   const raw = tokens.generateToken();
   const hash = tokens.hashToken(raw);
+  const expiresAt = tokenExpiry();
   transaction((tx) => {
     const r = tx.run(
       `UPDATE commissions
           SET approval_token_hash = ?,
+              approval_token_expires_at = ?,
               updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
         WHERE id = ?`,
-      [hash, commissionId]
+      [hash, expiresAt, commissionId]
     );
     if (r.changes !== 1) throw new Error("commission not found");
   });
