@@ -5,6 +5,7 @@ import { NextResponse } from "next/server";
 import * as tokens from "@/lib/approval-tokens";
 import * as commissions from "@/lib/commissions";
 import * as revisions from "@/lib/revisions";
+import type { DecisionFailureReason } from "@/lib/revisions";
 
 export async function POST(req: Request, { params }: { params: { token: string } }) {
   if (!tokens.isWellFormed(params.token)) return new NextResponse("Not found", { status: 404 });
@@ -30,11 +31,11 @@ export async function POST(req: Request, { params }: { params: { token: string }
   return NextResponse.redirect(new URL(`/a/${params.token}?thanks=1`, req.url));
 }
 
-function messageFor(reason: string): string {
+function messageFor(reason: DecisionFailureReason): string {
   switch (reason) {
     case "not_latest":      return "The artist has submitted a newer revision. Refresh to review it.";
     case "already_decided": return "This revision has already been decided.";
     case "wrong_state":     return "This commission is not awaiting approval.";
-    default:                return "Unable to record decision.";
+    case "not_found":       return "Revision not found.";
   }
 }
